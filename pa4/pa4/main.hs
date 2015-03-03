@@ -4,7 +4,9 @@ import System.IO
 import Text.Printf
 import Debug.Trace
 
+import Data.List
 import Data.Map (Map)
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 
@@ -43,7 +45,45 @@ data Node = Class Node (Maybe Node) [Node]              -- class_name, super_cla
 
 data Err = Err Int String                               -- line_num, error_message
 data Attr = Attr String String (Maybe Node)             -- name, type, init
+data Imp = Imp String [(String, String)] String String (Maybe Node)
+                                                        -- method_name, formals (name, type), return_type, owner, body
 
+init_class_map = Map.fromList [("Bool", []), 
+                               ("IO", []),
+                               ("Int", []),
+                               ("Object", []),
+                               ("String", [])
+                              ]
+init_imp_map = Map.fromList [("Object", [Imp "abort"         []                  "Object"    "Object"       Nothing,
+                                         Imp "copy"          []                  "SELF_TYPE" "Object"       Nothing,
+                                         Imp "type_name"     []                  "String"    "Object"       Nothing
+                                        ]),
+                             ("Bool",   [Imp "abort"         []                  "Object"    "Object"       Nothing,
+                                         Imp "copy"          []                  "SELF_TYPE" "Object"       Nothing,
+                                         Imp "type_name"     []                  "String"    "Object"       Nothing
+                                        ]),
+                             ("Int",    [Imp "abort"         []                  "Object"    "Object"       Nothing,
+                                         Imp "copy"          []                  "SELF_TYPE" "Object"       Nothing,
+                                         Imp "type_name"     []                  "String"    "Object"       Nothing
+                                        ]),
+                             ("IO",     [Imp "abort"         []                  "Object"    "Object"       Nothing,
+                                         Imp "copy"          []                  "SELF_TYPE" "Object"       Nothing,
+                                         Imp "type_name"     []                  "String"    "Object"       Nothing,
+                                         Imp "in_int"        []                  "Int"       "IO"           Nothing,
+                                         Imp "in_string"     []                  "String"    "IO"           Nothing,
+                                         Imp "out_int"       [("x", "Int")]      "SELF_TYPE" "IO"           Nothing,
+                                         Imp "out_string"    [("x", "String")]   "SELF_TYPE" "IO"           Nothing
+                                        ]),
+                             ("String", [Imp "abort"         []                  "Object"    "Object"       Nothing,
+                                         Imp "copy"          []                  "SELF_TYPE" "Object"       Nothing,
+                                         Imp "type_name"     []                  "String"    "Object"       Nothing,
+                                         Imp "concat"        [("s", "String")]   "String"    "String"       Nothing,
+                                         Imp "length"        []                  "Int"       "String"       Nothing,
+                                         Imp "substr"        [("i", "Int"), ("l", "Int")]
+                                                                                 "String"    "String"       Nothing
+                                        ])
+                            ]
+                                                        
 isRight :: Either x y -> Bool
 isRight (Right _) = True
 isRight _ = False
@@ -200,17 +240,24 @@ build_case_element content = (CaseElement var type_id expr, content''')
           (type_id, content'') = build_id content'
           (expr, content''') = build_expr content''
 
+get_class :: String -> [Node] -> Node
+get_class class_name ast =
+    head $ filter (\(Class (Id name _) _ _) -> name == class_name) ast
+
+convert_formals :: [Node] -> [(String, String)]
+convert_formals formal_list = foldr (\(Formal (Id formal_name _) (Id type_name _)) acc -> (formal_name, type_name):acc) [] formal_list
+
 create_class_ids :: [Node] -> Either [String] Err
 create_class_ids ast = class_ids
     where class_ids = foldl update_class_ids init_class_ids ast
           init_class_ids = Left ["Bool", "IO", "Int", "Object", "String"]
 
           update_class_ids :: Either [String] Err -> Node -> Either [String] Err
-          update_class_ids (Right err) node = Right err
-          update_class_ids (Left p) (Class (Id class_name class_line) _ _) =
-              if elem class_name p
-                 then Right $ Err class_line (printf "class %s redefined" class_name)
-                 else Left $ class_name:p
+          update_class_ids acc@(Right _) _ = acc
+          update_class_ids acc@(Left class_ids) (Class (Id class_name class_line) _ _) 
+              | elem class_name class_ids = Right $ Err class_line $ printf "class %s redefined" class_name
+              | class_name == "SELF_TYPE" = Right $ Err class_line "class named SELF_TYPE"
+              | otherwise =Left $ class_name:class_ids
 
 create_parent_map :: [String] -> [Node] -> Either (Map String String) Err
 create_parent_map class_ids [] = Left $ Map.fromList [("Bool", "Object"), ("IO", "Object"), ("Int", "Object"), ("String", "Object")]
@@ -230,56 +277,117 @@ create_parent_map class_ids ((Class (Id class_name class_line) Nothing _):xs) =
           else Left $ Map.insert class_name "Object" $ getLeft parent_map
 
 has_cycle :: [String] -> Map String String -> Bool
-has_cycle [] parent_map = False
-has_cycle (class_id:class_ids) parent_map = found_cycle || has_cycle class_ids parent_map
-    where found_cycle = Map.member class_id parent_map && encounter (Maybe.fromJust (Map.lookup class_id parent_map)) class_id parent_map
-          encounter :: String -> String -> Map String String -> Bool
-          encounter current goal parent_map =
-              current == goal || Map.member current parent_map && encounter (Maybe.fromJust (Map.lookup current parent_map)) goal parent_map
+has_cycle class_ids parent_map = any (\(class_name) -> found_cycle class_name) class_ids
+    where found_cycle :: String -> Bool
+          found_cycle class_name = found_cycle_rec class_name []
+          
+          found_cycle_rec :: String -> [String] -> Bool
+          found_cycle_rec current path
+              | current == "Object" = False
+              | elem current path = True
+              | otherwise = found_cycle_rec next (current:path)
+              where next = Maybe.fromJust $ Map.lookup current parent_map
 
-get_class :: String -> [Node] -> Node
-get_class class_name ast =
-    head $ filter (\(Class (Id name _) _ _) -> name == class_name) ast
+create_class_map :: [Node] -> [String] -> Map String String -> Either (Map String [Attr]) Err
+create_class_map ast class_ids parent_map = foldl add_to_class_map (Left init_class_map) ast          
+    where add_to_class_map :: Either (Map String [Attr]) Err -> Node -> Either (Map String [Attr]) Err
+          add_to_class_map acc@(Right _) _ = acc
+          add_to_class_map acc@(Left class_map) (Class (Id class_name _) _ feature_list)
+              | Map.member class_name class_map = acc
+              | otherwise = 
+                  let parent_name = Maybe.fromJust $ Map.lookup class_name parent_map
+                      parent_added = Map.member parent_name class_map
+                      class_map' = (if parent_added then acc else add_to_class_map acc (get_class parent_name ast))
+                  in if isRight class_map'
+                        then class_map'
+                        else let parent_attributes = Maybe.fromJust $ Map.lookup parent_name $ getLeft class_map'
+                                 class_attributes = foldl add_to_attribute_list (Left parent_attributes) feature_list
+                             in if isRight class_attributes
+                                   then Right $ getRight class_attributes
+                                   else Left $ Map.insert class_name (getLeft class_attributes) (getLeft class_map')
 
-create_class_map :: [Node] -> [Node] -> Map String String -> Either (Map String [Attr]) Err
-create_class_map [] _ _ = Left $ Map.fromList [("Bool", []), ("IO", []), ("Int", []), ("Object", []), ("String", [])]
-create_class_map ((Class (Id class_name _) _ _):xs) ast parent_map =
-    let class_map = create_class_map xs ast parent_map
-    in if isRight class_map || Map.member class_name (getLeft class_map)
-          then class_map
-          else add_to_class_map class_name ast parent_map $ getLeft class_map
+              where add_to_attribute_list :: Either [Attr] Err -> Node -> Either [Attr] Err
+                    add_to_attribute_list acc@(Right _) _ = acc
+                    add_to_attribute_list acc (Method _ _ _ _) = acc
+                    add_to_attribute_list (Left attributes) (Attribute (Id attr_name attr_line) (Id type_name type_line) optional_init)
+                        | any (\(Attr x _ _) -> x == attr_name) attributes = Right $ Err attr_line $ printf "class %s redefines attribute %s" class_name attr_name
+                        | attr_name == "self" = Right $ Err attr_line $ printf "class %s has an attribute named self" class_name
+                        | not (elem type_name ("SELF_TYPE":class_ids)) = Right $ Err type_line $ printf "class %s has attribute %s with unknown type %s" class_name attr_name type_name
+                        | otherwise = Left $ attributes ++ [Attr attr_name type_name optional_init]
 
-    where add_to_class_map :: String -> [Node] -> Map String String -> Map String [Attr] -> Either (Map String [Attr]) Err
-          add_to_class_map class_name ast parent_map class_map =
-              if Map.member class_name class_map
-                 then Left class_map
-                 else let Just parent_name = Map.lookup class_name parent_map
-                          parent_node = get_class parent_name ast
-                          class_map' = add_to_class_map parent_name ast parent_map class_map
-                      in if isRight class_map'
-                            then class_map'
-                            else let Just parent_attributes = Map.lookup parent_name (getLeft class_map')
-                                     (Class _ _ feature_list) = get_class class_name ast
-                                     class_attributes = add_to_attribute_list class_name parent_attributes (reverse feature_list)
-                                 in if isRight class_attributes
-                                       then Right $ getRight class_attributes
-                                       else Left $ Map.insert class_name (getLeft class_attributes) (getLeft class_map')
+create_imp_map :: [Node] -> [String] -> Map String String -> Either (Map String [Imp]) Err
+create_imp_map ast class_ids parent_map = foldl add_to_imp_map (Left init_imp_map) ast
+    where add_to_imp_map :: Either (Map String [Imp]) Err -> Node -> Either (Map String [Imp]) Err
+          add_to_imp_map acc@(Right _) _ = acc
+          add_to_imp_map acc@(Left imp_map) (Class (Id class_name _) _ feature_list)
+              | Map.member class_name imp_map = acc
+              | otherwise =
+                  let parent_name = Maybe.fromJust $ Map.lookup class_name parent_map
+                      parent_added = Map.member parent_name imp_map
+                      imp_map' = (if parent_added then acc else add_to_imp_map acc (get_class parent_name ast))
+                  in if isRight imp_map'
+                        then imp_map'
+                        else let parent_imp = Maybe.fromJust $ Map.lookup parent_name $ getLeft imp_map'
+                                 class_imp = foldl add_to_imp_list (Left parent_imp) feature_list
+                             in if isRight class_imp
+                                   then Right $ getRight class_imp
+                                   else Left $ Map.insert class_name (getLeft class_imp) (getLeft imp_map')
 
-          add_to_attribute_list :: String -> [Attr] -> [Node] -> Either [Attr] Err
-          add_to_attribute_list class_name attributes [] = Left attributes
-          add_to_attribute_list class_name attributes (feature:features) =
-              let attributes' = add_to_attribute_list class_name attributes features
-              in if isRight attributes'
-                    then attributes'
-                    else update_attribute_list class_name (getLeft attributes') feature
+              where add_to_imp_list :: Either [Imp] Err -> Node -> Either [Imp] Err
+                    add_to_imp_list acc@(Right _) _ = acc
+                    add_to_imp_list acc (Attribute _ _ _) = acc
+                    add_to_imp_list (Left imp_list) (Method (Id method_name method_line) formal_list (Id type_name type_line) body) =
+                        let check_method :: Maybe Err
+                            check_method
+                                | not (elem type_name ("SELF_TYPE":class_ids)) = Just $ Err type_line $ printf "class %s has method %s with unknown return type %s" class_name method_name type_name
+                                | otherwise = check_formal_list formal_list
+                                where check_formal_list :: [Node] -> Maybe Err
+                                      check_formal_list formal_list = check_formal_list_rec formal_list []
+                                        
+                                      check_formal_list_rec :: [Node] -> [String] -> Maybe Err
+                                      check_formal_list_rec [] _ = Nothing
+                                      check_formal_list_rec ((Formal (Id formal_name formal_line) (Id type_name type_line)):xs) defined
+                                         | elem formal_name defined = Just $ Err formal_line $ printf "class %s has method %s with duplicate formal parameter named %s" class_name method_name formal_name
+                                         | formal_name == "self" = Just $ Err formal_line $ printf "class %s has method %s with formal parameter named self" class_name method_name
+                                         | not (elem type_name class_ids) = Just $ Err type_line $ printf "class %s has method %s with formal parameter of unknown type %s" class_name method_name type_name
+                                         | otherwise = check_formal_list_rec xs (formal_name:defined)
 
-          update_attribute_list :: String -> [Attr] -> Node -> Either [Attr] Err
-          update_attribute_list class_name attributes (Attribute (Id attr_name attr_line) (Id type_name _) optional_init) =
-              if any (\(Attr x _ _) -> x == attr_name) attributes
-                 then Right $ Err attr_line $ printf "class %s redefines attribute %s" class_name attr_name
-                 else Left $ attributes ++ [Attr attr_name type_name optional_init]
-          update_attribute_list class_name attributes (Method _ _ _ _) = Left attributes
+                            method_error = check_method
+                            repeated = any (\(Imp x _ _ _ _) -> x == method_name) imp_list
+                        in if repeated
+                              then let overriden@(Imp _ _ _ owner _) = head $ filter (\(Imp x _ _ _ _) -> x == method_name) imp_list
+                                   in if owner == class_name
+                                         then Right $ Err method_line $ printf "class %s redefines method %s" class_name method_name
+                                         else if Maybe.isJust method_error
+                                            then Right $ Maybe.fromJust method_error 
+                                            else let check_override :: Imp -> Maybe Err
+                                                     check_override (Imp _ o_formals o_type _ _)
+                                                         | o_type /= type_name = Just $ Err type_line $ printf "class %s redefines method %s and changes return type (from %s to %s)" class_name method_name o_type type_name
+                                                         | length o_formals /= length formal_list = Just $ Err method_line $ printf "class %s redefines method %s and changes number of formals" class_name method_name
+                                                         | otherwise = check_formal_compatibility o_formals formal_list
+                                                         where check_formal_compatibility :: [(String, String)] -> [Node] -> Maybe Err
+                                                               check_formal_compatibility [] [] = Nothing
+                                                               check_formal_compatibility ((_, o_type):oxs) (Formal (Id n_name _) (Id n_type n_type_line):nxs)
+                                                                   | o_type /= n_type = Just $ Err n_type_line $ printf "class %s redefines method %s and changes type of formal %s" class_name method_name n_name
+                                                                   | otherwise = check_formal_compatibility oxs nxs
+                                                     override_error = check_override overriden
+                                                 in if Maybe.isJust override_error
+                                                       then Right $ Maybe.fromJust override_error
+                                                       else let im = Maybe.fromJust $ List.findIndex (\(Imp x _ _ _ _) -> x == method_name) imp_list
+                                                            in Left $ take im imp_list ++ [Imp method_name (convert_formals formal_list) type_name class_name (Just body)]
+                                                            ++ drop (im + 1) imp_list
+                              else if Maybe.isJust method_error
+                                 then Right $ Maybe.fromJust method_error
+                                 else Left $ imp_list ++ [Imp method_name (convert_formals formal_list) type_name class_name (Just body)]
 
+check_main :: Map String [Imp] -> Maybe Err
+check_main imp_map
+    | not $ Map.member "Main" imp_map = Just $ Err 0 "class Main not found"
+    | not $ any (\(Imp name _ _ _ _) -> name == "main") main_imp = Just $ Err 0 "class Main method main not found"
+    | not $ any (\(Imp name formal _ _ _) -> name == "main" && length formal == 0) main_imp = Just $ Err 0 "class Main method main with 0 parameters not found"
+    | otherwise = Nothing
+    where main_imp = Maybe.fromJust $ Map.lookup "Main" imp_map
+                                 
 output_nodes :: [Node] -> [String]
 output_nodes nodes = foldl (\acc node -> acc ++ output_node node) [] nodes
 
@@ -306,10 +414,10 @@ output_node (LessEqual line x y) = show line : "le" : output_nodes [x, y]
 output_node (Equal line x y) = show line : "eq" : output_nodes [x, y]
 output_node (Not line x) = show line : "not" : output_node x
 output_node (Negate line x) = show line : "negate" : output_node x
-output_node (IntL line x) = [show line, "int" , show x]
+output_node (IntL line x) = [show line, "integer" , show x]
 output_node (StringL line x) = [show line, "string", x]
-output_node (BoolL line x) = [show line, "bool", if x then "true" else "false"]
-output_node (Identifier line x) = show line : output_node x
+output_node (BoolL line x) = [show line, if x then "true" else "false"]
+output_node (Identifier line x) = show line : "identifier" : output_node x
 output_node (Let line bindings body) = show line : "let" : output_node_list bindings ++ output_node body
 output_node (Case line e case_elements) = show line : "case" : output_node e ++ output_node_list case_elements
 output_node (LetBinding var type_id Nothing) = "let_binding_no_init" : output_nodes [var, type_id]
@@ -326,11 +434,21 @@ output_class_map class_map =
           output_attribute (Attr attr_name type_name (Just initial)) = "initializer" : attr_name : type_name : output_node initial
           output_attribute (Attr attr_name type_name Nothing) = ["no_initializer", attr_name, type_name]
 
-print_parent_map :: Map String String -> Handle -> IO [()]
-print_parent_map parent_map outfp = do
-    hPutStrLn outfp "parent_map"
-    hPutStrLn outfp (show (Map.size parent_map))
-    mapM (\(x,y) -> hPutStrLn outfp (x ++ "\n" ++ y)) (Map.toList parent_map)
+output_imp_map :: Map String [Imp] -> [String]
+output_imp_map imp_map =
+    "implementation_map" : show (Map.size imp_map) : foldl (\acc (class_name, imp_list) -> acc ++ [class_name, show (length imp_list)] ++ output_imp_list imp_list) [] (Map.toList imp_map)
+    where output_imp_list :: [Imp] -> [String]
+          output_imp_list imp_list = foldl (\acc imp -> acc ++ output_imp imp) [] imp_list
+          
+          output_imp :: Imp -> [String]
+          output_imp (Imp method_name formals return_type owner body) = (method_name : show (length formals) : formal_names) ++ (owner : body_expr)
+              where formal_names = map (\(name, _) -> name) formals
+                    body_expr = if Maybe.isJust body
+                                   then output_node $ Maybe.fromJust body
+                                   else ["0", return_type, "internal", (owner ++ "." ++ method_name)]
+
+output_parent_map :: Map String String -> [String]
+output_parent_map parent_map = "parent_map" : show (Map.size parent_map) : foldr (\(x, y) acc-> x:y:acc) [] (Map.toList parent_map)
 
 report_error :: Err -> IO b
 report_error (Err line_num msg) = do
@@ -347,7 +465,7 @@ main = do
     let content = lines inputs
         ast = build_ast content
 
-    -- Constructs a set of class names
+    -- Constructs the set of class names
     let class_ids_p = create_class_ids ast
     if isRight class_ids_p
        then report_error $ getRight class_ids_p
@@ -366,15 +484,30 @@ main = do
        then report_error $ Err 0 "inheritance cycle"
        else return()
 
-    let class_map_p = create_class_map ast ast parent_map
+    -- Constructs the class map
+    let class_map_p = create_class_map ast class_ids parent_map
     if isRight class_map_p
        then report_error $ getRight class_map_p
        else return()
     let Left class_map = class_map_p
         
+    -- Constructs the implementation map
+    let imp_map_p = create_imp_map ast class_ids parent_map
+    if isRight imp_map_p
+       then report_error $ getRight imp_map_p
+       else return ()
+    let Left imp_map = imp_map_p
+    
+    -- Check main() method in Main class
+    let no_main_error = check_main imp_map
+    if Maybe.isJust no_main_error
+       then report_error $ Maybe.fromJust no_main_error
+       else return()
+
     -- Emit file
     outfp <- openFile output_filename WriteMode
     let class_map_output = output_class_map class_map
+    --let imp_map_output = output_imp_map imp_map
     mapM (\line -> hPutStrLn outfp line) class_map_output
     
     hClose infp
