@@ -1,0 +1,26 @@
+          | Assign Int Node Node String                       -- line_num, lhs, rhs
+          | DynamicDispatch Int Node Node [Node] String       -- line_num, e, method, args
+          | StaticDispatch Int Node Node Node [Node] String   -- line_num, e, type, method, args
+          | SelfDispatch Int Node [Node] String               -- line_num, method, args
+          | If Int Node Node Node String                      -- line_num, predicate, then_expr, else_expr
+          | While Int Node Node String                        -- line_num, predicate, body
+          | Block Int [Node] String                           -- line_num, body
+          | New Int Node String                               -- line_num, type_id
+          | Isvoid Int Node String                            -- line_num, x
+          | Plus Int Node Node String                         -- line_num, x, y
+          | Minus Int Node Node String                        -- line_num, x, y
+          | Times Int Node Node String                        -- line_num, x, y
+          | Divide Int Node Node String                       -- line_num, x, y
+          | LessThan Int Node Node String                     -- line_num, x, y
+          | LessEqual Int Node Node String                    -- line_num, x, y
+          | Equal Int Node Node String                        -- line_num, x, y
+          | Not Int Node String                               -- line_num, x
+          | Negate Int Node String                            -- line_num, x
+          | IntL Int Int String                               -- line_num, value
+          | StringL Int String String                         -- line_num, value
+          | BoolL Int Bool String                             -- line_num, truth
+          | Identifier Int Node String                        -- line_num, id
+          | Let Int [Node] Node String                        -- line_num, bindings, body
+          | Case Int Node [Node] String                       -- line_num, expr, case_elements
+          | LetBinding Node Node (Maybe Node)                 -- var, type, [init]
+          | CaseElement Node Node Node                        -- var, type, expr

@@ -15,38 +15,37 @@ data Node = Class Node (Maybe Node) [Node]              -- class_name, super_cla
           | Attribute Node Node (Maybe Node)            -- id, type, [init]
           | Method Node [Node] Node Node                -- id, formal_list, type, body
           | Formal Node Node                            -- id, type
-                                                        -- Expressions
-          | Assign Int Node Node                        -- line_num, lhs, rhs
-          | DynamicDispatch Int Node Node [Node]        -- line_num, e, method, args
-          | StaticDispatch Int Node Node Node [Node]    -- line_num, e, type, method, args
-          | SelfDispatch Int Node [Node]                -- line_num, method, args
-          | If Int Node Node Node                       -- line_num, predicate, then_expr, else_expr
-          | While Int Node Node                         -- line_num, predicate, body
-          | Block Int [Node]                            -- line_num, body
-          | New Int Node                                -- line_num, type_id
-          | Isvoid Int Node                             -- line_num, x
-          | Plus Int Node Node                          -- line_num, x, y
-          | Minus Int Node Node                         -- line_num, x, y
-          | Times Int Node Node                         -- line_num, x, y
-          | Divide Int Node Node                        -- line_num, x, y
-          | LessThan Int Node Node                      -- line_num, x, y
-          | LessEqual Int Node Node                     -- line_num, x, y
-          | Equal Int Node Node                         -- line_num, x, y
-          | Not Int Node                                -- line_num, x
-          | Negate Int Node                             -- line_num, x
-          | IntL Int Int                                -- line_num, value
-          | StringL Int String                          -- line_num, value
-          | BoolL Int Bool                              -- line_num, truth
-          | Identifier Int Node                         -- line_num, id
-          | Let Int [Node] Node                         -- line_num, bindings, body
-          | Case Int Node [Node]                        -- line_num, expr, case_elements
-          | LetBinding Node Node (Maybe Node)           -- var, type, [init]
-          | CaseElement Node Node Node                  -- var, type, expr
-
-data Err = Err Int String                               -- line_num, error_message
-data Attr = Attr String String (Maybe Node)             -- name, type, init
-data Imp = Imp String [(String, String)] String String (Maybe Node)
-                                                        -- method_name, formals (name, type), return_type, owner, body
+                                                                  -- Expressions
+          | Assign Int Node Node String                       -- line_num, lhs, rhs
+          | DynamicDispatch Int Node Node [Node] String       -- line_num, e, method, args
+          | StaticDispatch Int Node Node Node [Node] String   -- line_num, e, type, method, args
+          | SelfDispatch Int Node [Node] String               -- line_num, method, args
+          | If Int Node Node Node String                      -- line_num, predicate, then_expr, else_expr
+          | While Int Node Node String                        -- line_num, predicate, body
+          | Block Int [Node] String                           -- line_num, body
+          | New Int Node String                               -- line_num, type_id
+          | Isvoid Int Node String                            -- line_num, x
+          | Plus Int Node Node String                         -- line_num, x, y
+          | Minus Int Node Node String                        -- line_num, x, y
+          | Times Int Node Node String                        -- line_num, x, y
+          | Divide Int Node Node String                       -- line_num, x, y
+          | LessThan Int Node Node String                     -- line_num, x, y
+          | LessEqual Int Node Node String                    -- line_num, x, y
+          | Equal Int Node Node String                        -- line_num, x, y
+          | Not Int Node String                               -- line_num, x
+          | Negate Int Node String                            -- line_num, x
+          | IntL Int Int String                               -- line_num, value
+          | StringL Int String String                         -- line_num, value
+          | BoolL Int Bool String                             -- line_num, truth
+          | Identifier Int Node String                        -- line_num, id
+          | Let Int [Node] Node String                        -- line_num, bindings, body
+          | Case Int Node [Node] String                       -- line_num, expr, case_elements
+          | LetBinding Node Node (Maybe Node)                 -- var, type, [init]
+          | CaseElement Node Node Node                        -- var, type, expr
+          
+data Attr = Attr String String (Maybe Node)                             -- name, type, init
+data Err = Err Int String                                               -- line_num, error_message
+data Imp = Imp String [(String, String)] String String (Maybe Node)     -- method_name, formals (name, type), return_type, owner, body
 
 init_class_map = Map.fromList [("Bool", []), 
                                ("IO", []),
@@ -139,88 +138,88 @@ build_formal (name_line:name:type_line:type_name:content) =
     (Formal (Id name (read name_line :: Int)) (Id type_name (read type_line :: Int)), content)
 
 build_expr :: [String] -> (Node, [String])
-build_expr (line:"assign":content) = (Assign line_num lhs rhs, content'')
+build_expr (line:"assign":content) = (Assign line_num lhs rhs "", content'')
     where (lhs,content') = build_id content
           (rhs, content'') = build_expr content'
           line_num = read line :: Int
 
-build_expr (line:"dynamic_dispatch":content) = (DynamicDispatch line_num e method args, content''')
+build_expr (line:"dynamic_dispatch":content) = (DynamicDispatch line_num e method args "", content''')
     where (e, content') = build_expr content
           (method, content'') = build_id content'
           (args, content''') = build_list build_expr content''
           line_num = read line :: Int
 
-build_expr (line:"static_dispatch":content) = (StaticDispatch line_num e type_id method args, content'''')
+build_expr (line:"static_dispatch":content) = (StaticDispatch line_num e type_id method args "", content'''')
     where (e, content') = build_expr content
           (type_id, content'') = build_id content'
           (method, content''') = build_id content''
           (args, content'''') = build_list build_expr content'''
           line_num = read line :: Int
 
-build_expr (line:"self_dispatch":content) = (SelfDispatch line_num method args, content'')
+build_expr (line:"self_dispatch":content) = (SelfDispatch line_num method args "", content'')
     where (method, content') = build_id content
           (args, content'') = build_list build_expr content'
           line_num = read line :: Int
 
-build_expr (line:"if":content) = (If line_num predicate then_expr else_expr, content''')
+build_expr (line:"if":content) = (If line_num predicate then_expr else_expr "", content''')
     where (predicate, content') = build_expr content
           (then_expr, content'') = build_expr content'
           (else_expr, content''') = build_expr content''
           line_num = read line :: Int
 
-build_expr (line:"while":content) = (While line_num predicate body, content'')
+build_expr (line:"while":content) = (While line_num predicate body "", content'')
     where (predicate, content') = build_expr content
           (body, content'') = build_expr content'
           line_num = read line :: Int
 
-build_expr (line:"block":content) = (Block line_num body, content')
+build_expr (line:"block":content) = (Block line_num body "", content')
     where (body, content') = build_list build_expr content
           line_num = read line :: Int
 
-build_expr (line:"new":content) = (New line_num type_id, content')
+build_expr (line:"new":content) = (New line_num type_id "", content')
     where (type_id, content') = build_id content
           line_num = read line :: Int
 
 build_expr (line:command:content)
-    | command == "plus" = (Plus line_num x y, content'')
-    | command == "minus" = (Minus line_num x y, content'')
-    | command == "times" = (Times line_num x y, content'')
-    | command == "divide" = (Divide line_num x y, content'')
-    | command == "lt" = (LessThan line_num x y, content'')
-    | command == "le" = (LessEqual line_num x y, content'')
-    | command == "eq" = (Equal line_num x y, content'')
+    | command == "plus" = (Plus line_num x y "", content'')
+    | command == "minus" = (Minus line_num x y "", content'')
+    | command == "times" = (Times line_num x y "", content'')
+    | command == "divide" = (Divide line_num x y "", content'')
+    | command == "lt" = (LessThan line_num x y "", content'')
+    | command == "le" = (LessEqual line_num x y "", content'')
+    | command == "eq" = (Equal line_num x y "", content'')
     where (x, content') = build_expr content
           (y, content'') = build_expr content'
           line_num = read line :: Int
     
 build_expr (line:command:content)
-    | command == "isvoid" = (Isvoid line_num x, content')
-    | command == "not" = (Not line_num x, content')
-    | command == "negate" = (Negate line_num x, content')
+    | command == "isvoid" = (Isvoid line_num x "", content')
+    | command == "not" = (Not line_num x "", content')
+    | command == "negate" = (Negate line_num x "", content')
     where (x, content') = build_expr content
           line_num = read line :: Int
     
 build_expr (line:command:content)
-    | command == "integer" = (IntL line_num (read value :: Int), content')
-    | command == "string" = (StringL line_num value, content')
+    | command == "integer" = (IntL line_num (read value :: Int) "", content')
+    | command == "string" = (StringL line_num value "", content')
     where (value:content') = content
           line_num = read line :: Int
 
-build_expr (line:"identifier":content) = (Identifier line_num ident, content')
+build_expr (line:"identifier":content) = (Identifier line_num ident "", content')
     where (ident, content') = build_id content
           line_num = read line :: Int
 
 build_expr (line:command:content)
-    | command == "true" = (BoolL line_num True, content)
-    | command == "false" = (BoolL line_num False, content)
+    | command == "true" = (BoolL line_num True "", content)
+    | command == "false" = (BoolL line_num False "", content)
     where line_num = read line :: Int
 
-build_expr (line:"let":content) = (Let line_num bindings body, content'')
+build_expr (line:"let":content) = (Let line_num bindings body "", content'')
     where (bindings, content') = build_list build_let_binding content
           (body, content'') = build_expr content'
           line_num = read line :: Int
 
-build_expr (line:"case":content) = (Case line_num expr case_elements, content'')
+build_expr (line:"case":content) = (Case line_num expr case_elements "", content'')
     where (expr, content') = build_expr content
           (case_elements, content'') = build_list build_case_element content'
           line_num = read line :: Int
@@ -387,6 +386,179 @@ check_main imp_map
     | not $ any (\(Imp name formal _ _ _) -> name == "main" && length formal == 0) main_imp = Just $ Err 0 "class Main method main with 0 parameters not found"
     | otherwise = Nothing
     where main_imp = Maybe.fromJust $ Map.lookup "Main" imp_map
+
+create_type_environment :: [Attr] -> Map String String
+create_type_environment attributes = foldl (\acc (Attr name declared_type _) -> Map.insert name declared_type acc) Map.empty attributes
+
+bind :: Map String String -> [Node] -> Map String String
+bind o nodes = foldl bind' o nodes
+
+bind' :: Map String String -> Node -> Map String String
+bind' acc (Formal (Id name _) (Id type_name _)) = Map.insert name type_name acc
+
+conform :: Map String String -> String -> String -> String -> Bool
+conform p c "SELF_TYPE" "SELF_TYPE" = True
+conform p c "SELF_TYPE" t = conform' p c t
+conform p c t "SELF_TYPE" = False
+conform p c t t' = conform' p t t'
+
+conform' :: Map String String -> String -> String -> Bool
+conform' p sub "Object" = True
+conform' p "Object" super = False
+conform' p sub super
+    | sub == super = True
+    | otherwise = conform' p (Maybe.fromJust (Map.lookup sub p)) super
+
+type_check :: Map String String -> Map String [Imp] -> String -> Map String String -> Node -> Either (Node, String) Err
+type_check o m c p (Assign line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | not (conform p c lhs_type rhs_type) = Right $ Err line $ printf "%s does not conform to %s in assignment" (output_type' c rhs_type) (output_type' c lhs_type)
+    | otherwise = Left $ (Assign line lhs_node rhs_node rhs_type, rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+--type_check o m c p (Block line nodes _)
+
+          
+type_check o m c p (New line f2@(Id type_name _) _)
+    | type_name == "SELF_TYPE" = Left (New line f2 "SELF_TYPE", "SELF_TYPE")
+    | Map.member type_name m = Left (New line f2 type_name, type_name)
+    | otherwise = Right $ Err line $ printf "unknown type %s" type_name
+
+type_check o m c p (Isvoid line x _)
+    | isRight x' = x'
+    | otherwise = Left (Isvoid line x_node "Bool", "Bool")
+    where x' = type_check o m c p x
+          Left (x_node, x_type) = x'
+
+type_check o m c p (Plus line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | lhs_type == "Int" && rhs_type == "Int" = Left (Plus line lhs_node rhs_node "Int", "Int")
+    | otherwise = Right $ Err line $ printf "arithmetic on %s %s instead of Ints" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (Minus line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | lhs_type == "Int" && rhs_type == "Int" = Left (Minus line lhs_node rhs_node "Int", "Int")
+    | otherwise = Right $ Err line $ printf "arithmetic on %s %s instead of Ints" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (Times line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | lhs_type == "Int" && rhs_type == "Int" = Left (Times line lhs_node rhs_node "Int", "Int")
+    | otherwise = Right $ Err line $ printf "arithmetic on %s %s instead of Ints" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (Divide line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | lhs_type == "Int" && rhs_type == "Int" = Left (Divide line lhs_node rhs_node "Int", "Int")
+    | otherwise = Right $ Err line $ printf "arithmetic on %s %s instead of Ints" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (LessThan line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (LessThan line lhs_node rhs_node lhs_type, lhs_type)
+    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (LessEqual line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (LessEqual line lhs_node rhs_node lhs_type, lhs_type)
+    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (Equal line lhs rhs _)
+    | isRight lhs' = lhs'
+    | isRight rhs' = rhs'
+    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (Equal line lhs_node rhs_node lhs_type, lhs_type)
+    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    where lhs' = type_check o m c p lhs
+          rhs' = type_check o m c p rhs
+          Left (lhs_node, lhs_type) = lhs'
+          Left (rhs_node, rhs_type) = rhs'
+
+type_check o m c p (Not line x _)
+    | isRight x' = x'
+    | x_type == "Bool" = Left (Not line x "Bool", "Bool")
+    | otherwise = Right $ Err line $ printf "not applied to type %s instead of Bool" (output_type' c x_type)
+    where x' = type_check o m c p x
+          Left (x_node, x_type) = x'
+
+type_check o m c p (Negate line x _)
+    | isRight x' = x'
+    | x_type == "Int" = Left (Negate line x "Int", "Int")
+    | otherwise = Right $ Err line $ printf "not applied to type %s instead of Int" (output_type' c x_type)
+    where x' = type_check o m c p x
+          Left (x_node, x_type) = x'
+
+type_check o m c p (Identifier line f2@(Id name _) _)
+    | name == "self" = Left (Identifier line f2 "SELF_TYPE", "SELF_TYPE")
+    | Map.member name o = Left (Identifier line f2 id_type, id_type)
+    | otherwise = Right $ Err line $ printf "unbound identifier %s" name
+    where id_type = Maybe.fromJust $ Map.lookup name o
+
+type_check o m c p (IntL line value _) = Left (IntL line value "Int", "Int")
+type_check o m c p (StringL line value _) = Left (StringL line value "String", "String")
+type_check o m c p (BoolL line value _) = Left (BoolL line value "Bool", "Bool")
+
+annotate_ast :: Map String [Attr] -> Map String [Imp] -> Map String String -> [Node] -> Either [Node] Err
+annotate_ast class_map m p ast = foldl annotate_class (Left []) ast
+    where annotate_class :: Either [Node] Err -> Node -> Either [Node] Err
+          annotate_class acc@(Right _) _ = acc
+          annotate_class (Left class_list) (Class f1@(Id c _) f2 feature_list) =
+              let annotate_feature :: Either [Node] Err -> Node -> Either [Node] Err
+                  annotate_feature acc@(Right _) _ = acc
+                  annotate_feature (Left feature_list) feature@(Attribute _ _ Nothing) = Left $ feature_list ++ [feature]
+                  annotate_feature (Left feature_list) (Attribute f1@(Id _ attr_line) f2@(Id declared_type _) (Just initial)) =
+                      let initial' = type_check o m c p initial
+                      in if isRight initial'
+                            then Right $ getRight initial'
+                            else let Left (initial_node, initial_type) = initial'
+                                 in if not $ conform p c initial_type declared_type
+                                       then Right $ Err attr_line $ printf "%s does not conform to %s in initialized attribute" (output_type' c initial_type) (output_type' c declared_type)
+                                       else Left $ feature_list ++ [Attribute f1 f2 (Just initial_node)]
+                  annotate_feature (Left feature_list) (Method f1@(Id method_name method_line) formals f3@(Id return_type _) body) =
+                      let o' = bind o formals
+                          body' = type_check o' m c p body
+                      in if isRight body'
+                            then Right $ getRight body'
+                            else let Left (body_node, body_type) = body'
+                                 in if not $conform p c body_type return_type
+                                       then Right $ Err method_line $ printf "%s does not conform to %s in method %s" (output_type' c body_type) (output_type' c return_type) method_name
+                                       else Left $ feature_list ++ [Method f1 formals f3 body_node]
+
+                  o = create_type_environment $ Maybe.fromJust $ Map.lookup c class_map
+                  feature_list' = foldl annotate_feature (Left []) feature_list
+              in if isRight feature_list'
+                    then Right $ getRight feature_list'
+                    else Left $ class_list ++ [Class f1 f2 (getLeft feature_list')]
                                  
 output_nodes :: [Node] -> [String]
 output_nodes nodes = foldl (\acc node -> acc ++ output_node node) [] nodes
@@ -394,32 +566,42 @@ output_nodes nodes = foldl (\acc node -> acc ++ output_node node) [] nodes
 output_node_list :: [Node] -> [String]
 output_node_list nodes = show (length nodes) : output_nodes nodes
 
+output_type' :: String -> String -> String
+output_type' class_name "SELF_TYPE" = printf "SELF_TYPE(%s)" class_name
+output_type' class_name t = t
+
 output_node :: Node -> [String]
+output_node (Class name Nothing features) = output_node name ++ ["no_inherits"] ++ output_node_list features
+output_node (Class name (Just super) features) = output_node name ++ ["inherits"] ++ output_node super ++ output_node_list features
+output_node (Attribute name declared_type Nothing) = "attribute_no_init" : output_nodes [name, declared_type]
+output_node (Attribute name declared_type (Just initial)) = "attribute_init" : output_nodes [name, declared_type, initial]
+output_node (Method name formals return_type body) = "method" : output_node name ++ output_node_list formals ++ output_nodes [return_type, body]
+output_node (Formal name declared_type) = output_nodes [name, declared_type]
 output_node (Id var line) = [show line, var]
-output_node (Assign line lhs rhs) = show line : "assign" : output_node lhs ++ output_node rhs
-output_node (DynamicDispatch line e method args) = show line : "dynamic_dispatch" : output_nodes [e, method] ++ output_node_list args
-output_node (StaticDispatch line e type_id method args) = show line : "static_dispatch" : output_nodes [e, type_id, method] ++ output_node_list args
-output_node (SelfDispatch line method args) = show line : "self_dispatch" : output_node method ++ output_node_list args
-output_node (If line predicate then_expr else_expr) = show line : "if" : output_nodes [predicate, then_expr, else_expr]
-output_node (While line predicate body) = show line : "while" : output_nodes [predicate, body]
-output_node (Block line body) = show line : "block" : output_node_list body
-output_node (New line type_id) = show line : "new" : output_node type_id
-output_node (Isvoid line x) = show line : "isvoid" : output_node x
-output_node (Plus line x y) = show line : "plus" : output_nodes [x, y]
-output_node (Minus line x y) = show line : "minus" : output_nodes [x, y]
-output_node (Times line x y) = show line : "times" : output_nodes [x, y]
-output_node (Divide line x y) = show line : "divide" : output_nodes [x, y]
-output_node (LessThan line x y) = show line : "lt" : output_nodes [x, y]
-output_node (LessEqual line x y) = show line : "le" : output_nodes [x, y]
-output_node (Equal line x y) = show line : "eq" : output_nodes [x, y]
-output_node (Not line x) = show line : "not" : output_node x
-output_node (Negate line x) = show line : "negate" : output_node x
-output_node (IntL line x) = [show line, "integer" , show x]
-output_node (StringL line x) = [show line, "string", x]
-output_node (BoolL line x) = [show line, if x then "true" else "false"]
-output_node (Identifier line x) = show line : "identifier" : output_node x
-output_node (Let line bindings body) = show line : "let" : output_node_list bindings ++ output_node body
-output_node (Case line e case_elements) = show line : "case" : output_node e ++ output_node_list case_elements
+output_node (Assign line lhs rhs anno) = show line : "assign" : anno : output_node lhs ++ output_node rhs
+output_node (DynamicDispatch line e method args anno) = show line : anno : "dynamic_dispatch" : output_nodes [e, method] ++ output_node_list args
+output_node (StaticDispatch line e type_id method args anno) = show line : anno : "static_dispatch" : output_nodes [e, type_id, method] ++ output_node_list args
+output_node (SelfDispatch line method args anno) = show line : anno : "self_dispatch" : output_node method ++ output_node_list args
+output_node (If line predicate then_expr else_expr anno) = show line : anno : "if" : output_nodes [predicate, then_expr, else_expr]
+output_node (While line predicate body anno) = show line : anno : "while" : output_nodes [predicate, body]
+output_node (Block line body anno) = show line : anno : "block" : output_node_list body
+output_node (New line type_id anno) = show line : anno : "new" : output_node type_id
+output_node (Isvoid line x anno) = show line : anno : "isvoid" : output_node x
+output_node (Plus line x y anno) = show line : anno : "plus" : output_nodes [x, y]
+output_node (Minus line x y anno) = show line : anno : "minus" : output_nodes [x, y]
+output_node (Times line x y anno) = show line : anno : "times" : output_nodes [x, y]
+output_node (Divide line x y anno) = show line : anno : "divide" : output_nodes [x, y]
+output_node (LessThan line x y anno) = show line : anno : "lt" : output_nodes [x, y]
+output_node (LessEqual line x y anno) = show line : anno : "le" : output_nodes [x, y]
+output_node (Equal line x y anno) = show line : anno : "eq" : output_nodes [x, y]
+output_node (Not line x anno) = show line : anno : "not" : output_node x
+output_node (Negate line x anno) = show line : anno : "negate" : output_node x
+output_node (IntL line x anno) = [show line, anno, "integer" , show x]
+output_node (StringL line x anno) = [show line, anno, "string", x]
+output_node (BoolL line x anno) = [show line, anno, if x then "true" else "false"]
+output_node (Identifier line x anno) = show line : anno : "identifier" : output_node x
+output_node (Let line bindings body anno) = show line : anno : "let" : output_node_list bindings ++ output_node body
+output_node (Case line e case_elements anno) = show line : anno : "case" : output_node e ++ output_node_list case_elements
 output_node (LetBinding var type_id Nothing) = "let_binding_no_init" : output_nodes [var, type_id]
 output_node (LetBinding var type_id (Just initial)) = "let_binding_no_init" : output_nodes [var, type_id, initial]
 output_node (CaseElement var type_id expr) = output_nodes [var, type_id, expr]
@@ -466,18 +648,18 @@ main = do
         ast = build_ast content
 
     -- Constructs the set of class names
-    let class_ids_p = create_class_ids ast
-    if isRight class_ids_p
-       then report_error $ getRight class_ids_p
+    let class_ids' = create_class_ids ast
+    if isRight class_ids'
+       then report_error $ getRight class_ids'
        else return ()
-    let Left class_ids = class_ids_p
+    let Left class_ids = class_ids'
 
     -- Constructs the parent map
-    let parent_map_p = create_parent_map class_ids ast
-    if isRight parent_map_p
-       then report_error $ getRight parent_map_p
+    let parent_map' = create_parent_map class_ids ast
+    if isRight parent_map'
+       then report_error $ getRight parent_map'
        else return()
-    let Left parent_map = parent_map_p
+    let Left parent_map = parent_map'
     
     -- Check if parent map contains cycles
     if has_cycle class_ids parent_map
@@ -485,30 +667,46 @@ main = do
        else return()
 
     -- Constructs the class map
-    let class_map_p = create_class_map ast class_ids parent_map
-    if isRight class_map_p
-       then report_error $ getRight class_map_p
+    let class_map' = create_class_map ast class_ids parent_map
+    if isRight class_map'
+       then report_error $ getRight class_map'
        else return()
-    let Left class_map = class_map_p
+    let Left class_map = class_map'
         
     -- Constructs the implementation map
-    let imp_map_p = create_imp_map ast class_ids parent_map
-    if isRight imp_map_p
-       then report_error $ getRight imp_map_p
+    let imp_map' = create_imp_map ast class_ids parent_map
+    if isRight imp_map'
+       then report_error $ getRight imp_map'
        else return ()
-    let Left imp_map = imp_map_p
+    let Left imp_map = imp_map'
     
     -- Check main() method in Main class
     let no_main_error = check_main imp_map
     if Maybe.isJust no_main_error
        then report_error $ Maybe.fromJust no_main_error
        else return()
+    
+    -- Type-check the AST
+    let annotated_ast' = annotate_ast class_map imp_map parent_map ast
+    if isRight annotated_ast'
+       then report_error $ getRight annotated_ast'
+       else return()
+    let Left annotated_ast = annotated_ast'
+        
+    -- Re-generate class_map and imp_map
+    let annotated_class_map = getLeft $ create_class_map annotated_ast class_ids parent_map
+    let annotated_imp_map = getLeft $ create_imp_map annotated_ast class_ids parent_map
 
     -- Emit file
     outfp <- openFile output_filename WriteMode
-    let class_map_output = output_class_map class_map
-    --let imp_map_output = output_imp_map imp_map
+    let class_map_output = output_class_map annotated_class_map
+    let imp_map_output = output_imp_map annotated_imp_map
+    let parent_map_output = output_parent_map parent_map
+    let ast_output = output_node_list annotated_ast
     mapM (\line -> hPutStrLn outfp line) class_map_output
+    mapM (\line -> hPutStrLn outfp line) imp_map_output
+    mapM (\line -> hPutStrLn outfp line) parent_map_output
+    mapM (\line -> hPutStrLn outfp line) ast_output
     
     hClose infp
     hClose outfp

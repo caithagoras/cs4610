@@ -25,7 +25,7 @@ ghc main.hs
 
 for test in ${tests[@]}
 do
-    cool --out "$dir/reference" --class-map "$dir/$test.cl" >& "$dir/reference.cl-type"
+    cool --out "$dir/reference" --type "$dir/$test.cl" >& "$dir/reference.cl-type"
     cool --parse "$dir/$test.cl"
     ./main "$dir/$test.cl-ast" >& "$dir/$test.cl-type"
 
