@@ -10,12 +10,12 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 
-data Node = Class Node (Maybe Node) [Node]              -- class_name, super_class, feature_list
-          | Id String Int                               -- id, line_num
-          | Attribute Node Node (Maybe Node)            -- id, type, [init]
-          | Method Node [Node] Node Node                -- id, formal_list, type, body
-          | Formal Node Node                            -- id, type
-                                                                  -- Expressions
+data Node = Class Node (Maybe Node) [Node]                    -- class_name, super_class, feature_list
+          | Id String Int                                     -- id, line_num
+          | Attribute Node Node (Maybe Node)                  -- id, type, [init]
+          | Method Node [Node] Node Node                      -- id, formal_list, type, body
+          | Formal Node Node                                  -- id, type
+                                               -- Expressions
           | Assign Int Node Node String                       -- line_num, lhs, rhs
           | DynamicDispatch Int Node Node [Node] String       -- line_num, e, method, args
           | StaticDispatch Int Node Node Node [Node] String   -- line_num, e, type, method, args
@@ -409,20 +409,142 @@ conform' p sub super
     | sub == super = True
     | otherwise = conform' p (Maybe.fromJust (Map.lookup sub p)) super
 
+conform_parameters :: Int -> Map String String -> String -> [String] -> [String] -> Maybe Err
+conform_parameters line p c actuals formals = conform_parameters' actuals formals 1
+    where conform_parameters' :: [String] -> [String] -> Int -> Maybe Err
+          conform_parameters' [] [] _ = Nothing
+          conform_parameters' (actual:actuals) (formal:formals) arg_num
+              | not $ conform p c actual formal = Just $ Err line $ printf "argument #%d type %s does not conform to formal type %s" arg_num actual formal
+              | otherwise = conform_parameters' actuals formals (arg_num + 1)
+
+lub :: Map String String -> String -> String -> String -> String
+lub p c "SELF_TYPE" "SELF_TYPE" = "SELF_TYPE"
+lub p c "SELF_TYPE" t = lub' p c t
+lub p c t "SELF_TYPE" = lub' p c t
+lub p c t t' = lub' p t t'
+
+lub':: Map String String -> String -> String -> String
+lub' p t1 t2 =
+    let get_root_path :: Map String String -> String -> [String]
+        get_root_path p "Object" = ["Object"]
+        get_root_path p t = t : (get_root_path p $ Maybe.fromJust $ Map.lookup t p)
+        
+        path1 = get_root_path p t1
+        path2 = get_root_path p t2
+        
+    in head $ filter (\c -> elem c path1) path2
+
+type_check_list :: Map String String -> Map String [Imp] -> String -> Map String String -> [Node] -> Either ([Node], [String]) Err
+type_check_list o m c p nodes = foldl type_check' (Left ([], [])) nodes
+    where type_check' :: Either ([Node], [String]) Err -> Node -> Either ([Node], [String]) Err
+          type_check' acc@(Right _) _ = acc
+          type_check' (Left (node_list, type_list)) node =
+              let node' = type_check o m c p node
+                  Left (annotated_node, node_type) = node'
+              in if isRight node'
+                    then Right $ getRight node'
+                    else Left (node_list ++ [annotated_node], type_list ++ [node_type])
+
 type_check :: Map String String -> Map String [Imp] -> String -> Map String String -> Node -> Either (Node, String) Err
+type_check o m c p (Id name line)
+    | name == "self" = Left (Id name line, "SELF_TYPE")
+    | Map.member name o = Left (Id name line, Maybe.fromJust (Map.lookup name o))
+    | otherwise = Right $ Err line $ printf "unbound variable %s" name
+
 type_check o m c p (Assign line lhs rhs _)
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
     | not (conform p c lhs_type rhs_type) = Right $ Err line $ printf "%s does not conform to %s in assignment" (output_type' c rhs_type) (output_type' c lhs_type)
-    | otherwise = Left $ (Assign line lhs_node rhs_node rhs_type, rhs_type)
+    | otherwise = Left (Assign line lhs_node rhs_node rhs_type, rhs_type)
     where lhs' = type_check o m c p lhs
           rhs' = type_check o m c p rhs
           Left (lhs_node, lhs_type) = lhs'
           Left (rhs_node, rhs_type) = rhs'
 
---type_check o m c p (Block line nodes _)
+type_check o m c p (DynamicDispatch line recv method_node@(Id method_name method_line) args _)
+    | isRight recv' = recv'
+    | isRight args' = Right $ getRight args'
+    | not method_exists = Right $ Err method_line $ printf "unknown method %s in dispatch on %s" method_name t0'
+    | length arg_type_list /= length formal_type_list = Right $ Err line $ printf "wrong number of actual arguments (%d vs. %d)" (length arg_type_list) (length formal_type_list)
+    | Maybe.isJust parameter_result = Right $ Maybe.fromJust parameter_result
+    | otherwise = Left (DynamicDispatch line recv_node method_node arg_node_list return_type', return_type')
+    where recv' = type_check o m c p recv
+          args' = type_check_list o m c p args
+          Left (recv_node, recv_type) = recv'
+          Left (arg_node_list, arg_type_list) = args'
+          t0' = if recv_type == "SELF_TYPE" then c else recv_type
+          method_found = filter (\(Imp x _ _ _ _) -> x == method_name) $ Maybe.fromJust $ Map.lookup t0' m
+          method_exists = length method_found > 0
+          Imp _ formals return_type _ _ = head $ method_found
+          formal_type_list = map (\(formal_name, formal_type) -> formal_type) formals
+          parameter_result = conform_parameters line p c arg_type_list formal_type_list
+          return_type' = if return_type == "SELF_TYPE" then recv_type else return_type
 
+type_check o m c p (StaticDispatch line recv f3@(Id t _) method_node@(Id method_name method_line) args _)
+    | isRight recv' = recv'
+    | isRight args' = Right $ getRight args'
+    | not $ conform p c recv_type t =Right $ Err line $ printf "%s does not conform to %s in static dispatch" (output_type' c recv_type) t
+    | not method_exists = Right $ Err method_line $ printf "unknown method %s in dispatch on %s" method_name t
+    | length arg_type_list /= length formal_type_list = Right $ Err line $ printf "wrong number of actual arguments (%d vs. %d)" (length arg_type_list) (length formal_type_list)
+    | Maybe.isJust parameter_result = Right $ Maybe.fromJust parameter_result
+    | otherwise = Left (StaticDispatch line recv_node f3 method_node arg_node_list return_type', return_type')
+    where recv' = type_check o m c p recv
+          args' = type_check_list o m c p args
+          Left (recv_node, recv_type) = recv'
+          Left (arg_node_list, arg_type_list) = args'
+          method_found = filter (\(Imp x _ _ _ _) -> x == method_name) $ Maybe.fromJust $ Map.lookup t m
+          method_exists = length method_found > 0
+          Imp _ formals return_type _ _ = head $ method_found
+          formal_type_list = map (\(formal_name, formal_type) -> formal_type) formals
+          parameter_result = conform_parameters line p c arg_type_list formal_type_list
+          return_type' = if return_type == "SELF_TYPE" then recv_type else return_type
+
+type_check o m c p (SelfDispatch line method_node@(Id method_name method_line) args _)
+    | isRight args' = Right $ getRight args'
+    | not method_exists = Right $ Err method_line $ printf "unknown method %s in dispatch on %s" method_name c
+    | length arg_type_list /= length formal_type_list = Right $ Err line $ printf "wrong number of actual arguments (%d vs. %d)" (length arg_type_list) (length formal_type_list)
+    | Maybe.isJust parameter_result = Right $ Maybe.fromJust parameter_result
+    | otherwise = Left (SelfDispatch line method_node arg_node_list return_type, return_type)
+    where args' = type_check_list o m c p args
+          Left (arg_node_list, arg_type_list) = args'
+          method_found = filter (\(Imp x _ _ _ _) -> x == method_name) $ Maybe.fromJust $ Map.lookup c m
+          method_exists = length method_found > 0
+          Imp _ formals return_type _ _ = head $ method_found
+          formal_type_list = map (\(formal_name, formal_type) -> formal_type) formals
+          parameter_result = conform_parameters line p c arg_type_list formal_type_list
           
+type_check o m c p (If line predicate then_expr else_expr _)
+    | isRight predicate' = predicate'
+    | isRight then_expr' = then_expr'
+    | isRight else_expr' = else_expr'
+    | predicate_type /= "Bool" = Right $ Err line $ printf "conditional has type %s instead of Bool" predicate_type
+    | otherwise = Left (If line predicate_node then_expr_node else_expr_node conditional_type, conditional_type)
+    where predicate' = type_check o m c p predicate
+          then_expr' = type_check o m c p then_expr
+          else_expr' = type_check o m c p else_expr
+          Left (predicate_node, predicate_type) = predicate'
+          Left (then_expr_node, then_expr_type) = then_expr'
+          Left (else_expr_node, else_expr_type) = else_expr'
+          conditional_type = lub p c then_expr_type else_expr_type
+
+type_check o m c p (While line predicate body _)
+    | isRight predicate' = predicate'
+    | isRight body' = body'
+    | predicate_type /= "Bool" = Right $ Err line $ printf "predicate has type %s instead of Bool" predicate_type
+    | otherwise = Left (While line predicate_node body_node "Object", "Object")
+    where predicate' = type_check o m c p predicate
+          body' = type_check o m c p body
+          Left (predicate_node, predicate_type) = predicate'
+          Left (body_node, body_type) = body'
+
+type_check o m c p (Block line nodes _) =
+    let block_result = type_check_list o m c p nodes
+        Left (node_list, type_list) = block_result
+        block_type = last type_list
+    in if isRight block_result
+          then Right $ getRight block_result
+          else Left (Block line node_list block_type, block_type)
+
 type_check o m c p (New line f2@(Id type_name _) _)
     | type_name == "SELF_TYPE" = Left (New line f2 "SELF_TYPE", "SELF_TYPE")
     | Map.member type_name m = Left (New line f2 type_name, type_name)
@@ -518,15 +640,18 @@ type_check o m c p (Negate line x _)
     where x' = type_check o m c p x
           Left (x_node, x_type) = x'
 
-type_check o m c p (Identifier line f2@(Id name _) _)
-    | name == "self" = Left (Identifier line f2 "SELF_TYPE", "SELF_TYPE")
-    | Map.member name o = Left (Identifier line f2 id_type, id_type)
-    | otherwise = Right $ Err line $ printf "unbound identifier %s" name
-    where id_type = Maybe.fromJust $ Map.lookup name o
+type_check o m c p (Identifier line ident _)
+    | isRight ident' = ident'
+    | otherwise = Left (Identifier line ident_node ident_type, ident_type)
+    where ident' = type_check o m c p ident
+          Left (ident_node, ident_type) = ident'
 
 type_check o m c p (IntL line value _) = Left (IntL line value "Int", "Int")
 type_check o m c p (StringL line value _) = Left (StringL line value "String", "String")
 type_check o m c p (BoolL line value _) = Left (BoolL line value "Bool", "Bool")
+
+type_check o m c p (Let line bindings _) =
+    
 
 annotate_ast :: Map String [Attr] -> Map String [Imp] -> Map String String -> [Node] -> Either [Node] Err
 annotate_ast class_map m p ast = foldl annotate_class (Left []) ast
@@ -578,7 +703,7 @@ output_node (Attribute name declared_type (Just initial)) = "attribute_init" : o
 output_node (Method name formals return_type body) = "method" : output_node name ++ output_node_list formals ++ output_nodes [return_type, body]
 output_node (Formal name declared_type) = output_nodes [name, declared_type]
 output_node (Id var line) = [show line, var]
-output_node (Assign line lhs rhs anno) = show line : "assign" : anno : output_node lhs ++ output_node rhs
+output_node (Assign line lhs rhs anno) = show line : anno : "assign" : output_node lhs ++ output_node rhs
 output_node (DynamicDispatch line e method args anno) = show line : anno : "dynamic_dispatch" : output_nodes [e, method] ++ output_node_list args
 output_node (StaticDispatch line e type_id method args anno) = show line : anno : "static_dispatch" : output_nodes [e, type_id, method] ++ output_node_list args
 output_node (SelfDispatch line method args anno) = show line : anno : "self_dispatch" : output_node method ++ output_node_list args
