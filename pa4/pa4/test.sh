@@ -18,7 +18,7 @@ tests=(
     valid_attribute_method_same_name
 )
 COMMENT
-tests=(t)
+tests=(rosetta)
 dir="."
 
 ghc main.hs

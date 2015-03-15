@@ -93,6 +93,9 @@ getLeft (Left p) = p
 getRight :: Either x y -> y
 getRight (Right p) = p
 
+detuplize :: [(a,b)] -> ([a], [b])
+detuplize list = foldl (\(acc_x, acc_y) (x, y) -> (acc_x ++ [x], acc_y ++ [y])) ([], []) list
+
 build_list :: ([String] -> (Node, [String])) -> [String] -> ([Node], [String])
 build_list build_fn (num:content) =
     build_list_rec build_fn content (read num :: Int)
@@ -431,8 +434,11 @@ lub' p t1 t2 =
         
         path1 = get_root_path p t1
         path2 = get_root_path p t2
-        
     in head $ filter (\c -> elem c path1) path2
+
+lub_list :: Map String String -> String -> [String] -> String
+lub_list p c [t] = t
+lub_list p c (t:xs) = lub p c t $ lub_list p c xs
 
 type_check_list :: Map String String -> Map String [Imp] -> String -> Map String String -> [Node] -> Either ([Node], [String]) Err
 type_check_list o m c p nodes = foldl type_check' (Left ([], [])) nodes
@@ -449,7 +455,7 @@ type_check :: Map String String -> Map String [Imp] -> String -> Map String Stri
 type_check o m c p (Id name line)
     | name == "self" = Left (Id name line, "SELF_TYPE")
     | Map.member name o = Left (Id name line, Maybe.fromJust (Map.lookup name o))
-    | otherwise = Right $ Err line $ printf "unbound variable %s" name
+    | otherwise = Right $ Err line $ printf "unbound identifier %s" name
 
 type_check o m c p (Assign line lhs rhs _)
     | isRight lhs' = lhs'
@@ -599,8 +605,8 @@ type_check o m c p (Divide line lhs rhs _)
 type_check o m c p (LessThan line lhs rhs _)
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
-    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (LessThan line lhs_node rhs_node lhs_type, lhs_type)
-    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | (elem lhs_type ["Int", "String", "Bool"] || elem rhs_type ["Int", "String", "Bool"]) && lhs_type /= rhs_type = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | otherwise = Left (LessThan line lhs_node rhs_node "Bool", "Bool")
     where lhs' = type_check o m c p lhs
           rhs' = type_check o m c p rhs
           Left (lhs_node, lhs_type) = lhs'
@@ -609,8 +615,8 @@ type_check o m c p (LessThan line lhs rhs _)
 type_check o m c p (LessEqual line lhs rhs _)
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
-    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (LessEqual line lhs_node rhs_node lhs_type, lhs_type)
-    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | (elem lhs_type ["Int", "String", "Bool"] || elem rhs_type ["Int", "String", "Bool"]) && lhs_type /= rhs_type = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | otherwise = Left (LessEqual line lhs_node rhs_node "Bool", "Bool")
     where lhs' = type_check o m c p lhs
           rhs' = type_check o m c p rhs
           Left (lhs_node, lhs_type) = lhs'
@@ -619,8 +625,8 @@ type_check o m c p (LessEqual line lhs rhs _)
 type_check o m c p (Equal line lhs rhs _)
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
-    | elem lhs_type ["Int", "String", "Bool"] && lhs_type == rhs_type = Left (Equal line lhs_node rhs_node lhs_type, lhs_type)
-    | otherwise = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | (elem lhs_type ["Int", "String", "Bool"] || elem rhs_type ["Int", "String", "Bool"]) && lhs_type /= rhs_type = Right $ Err line $ printf "comparison between %s and %s" (output_type' c lhs_type) (output_type' c rhs_type)
+    | otherwise = Left (Equal line lhs_node rhs_node "Bool", "Bool")
     where lhs' = type_check o m c p lhs
           rhs' = type_check o m c p rhs
           Left (lhs_node, lhs_type) = lhs'
@@ -628,14 +634,14 @@ type_check o m c p (Equal line lhs rhs _)
 
 type_check o m c p (Not line x _)
     | isRight x' = x'
-    | x_type == "Bool" = Left (Not line x "Bool", "Bool")
+    | x_type == "Bool" = Left (Not line x_node "Bool", "Bool")
     | otherwise = Right $ Err line $ printf "not applied to type %s instead of Bool" (output_type' c x_type)
     where x' = type_check o m c p x
           Left (x_node, x_type) = x'
 
 type_check o m c p (Negate line x _)
     | isRight x' = x'
-    | x_type == "Int" = Left (Negate line x "Int", "Int")
+    | x_type == "Int" = Left (Negate line x_node "Int", "Int")
     | otherwise = Right $ Err line $ printf "not applied to type %s instead of Int" (output_type' c x_type)
     where x' = type_check o m c p x
           Left (x_node, x_type) = x'
@@ -675,9 +681,26 @@ type_check o m c p (Let line bindings body _) =
 
 type_check o m c p (Case line expr elements _)
     | isRight expr' = expr'
-    
-    where expr' = type_check o m c p expr'
-          elements' = map process_element 
+    | isRight elements' = Right $ getRight elements'
+    | otherwise = Left (Case line expr_node nodes case_type, case_type)
+    where expr' = type_check o m c p expr
+          Left (expr_node, _) = expr'
+          elements' = foldl process_element (Left ([], [], [])) elements
+          Left (nodes, expr_types, _) = elements'
+          case_type = lub_list p c expr_types
+
+          process_element :: Either ([Node], [String], [String]) Err -> Node -> Either ([Node], [String], [String]) Err
+          process_element acc@(Right _) _ = acc
+          process_element (Left (nodes, expr_types, bound_types)) (CaseElement var@(Id var_name var_line) type_id@(Id type_name type_line) expr)
+              | var_name == "self" = Right $ Err var_line "binding self in a case expression is not allowed"
+              | type_name == "SELF_TYPE" = Right $ Err type_line "using SELF_TYPE as a case branch type is not allowed"
+              | not $ Map.member type_name m = Right $ Err var_line $ printf "unknown type %s" type_name
+              | elem type_name bound_types = Right $ Err var_line $ printf "case branch type %s is bound twice" type_name
+              | isRight expr' = Right $ getRight expr'
+              | otherwise = Left (nodes ++ [CaseElement var type_id expr_node], expr_types ++ [expr_type], bound_types ++ [type_name])
+              where o' = Map.insert var_name type_name o
+                    expr' = type_check o' m c p expr
+                    Left (expr_node, expr_type) = expr'
 
 annotate_ast :: Map String [Attr] -> Map String [Imp] -> Map String String -> [Node] -> Either [Node] Err
 annotate_ast class_map m p ast = foldl annotate_class (Left []) ast
