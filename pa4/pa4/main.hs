@@ -650,8 +650,34 @@ type_check o m c p (IntL line value _) = Left (IntL line value "Int", "Int")
 type_check o m c p (StringL line value _) = Left (StringL line value "String", "String")
 type_check o m c p (BoolL line value _) = Left (BoolL line value "Bool", "Bool")
 
-type_check o m c p (Let line bindings _) =
+type_check o m c p (Let line bindings body _) =
+    let bindings' = foldl process_let_binding (Left (o, [])) bindings
+        Left (o', bindings_node) = bindings'
+        body' = type_check o' m c p body
+        Left (body_node, body_type) = body'
+        
+        process_let_binding :: Either (Map String String, [Node]) Err -> Node -> Either (Map String String, [Node]) Err
+        process_let_binding acc@(Right _) _ = acc
+        process_let_binding (Left (o, bindings)) binding@(LetBinding f1@(Id var_name _) f2@(Id declared_type type_line) initial)
+            | not type_is_defined = Right $ Err type_line $ printf "unknown type %s" declared_type
+            | Maybe.isNothing initial = Left (Map.insert var_name declared_type o, bindings ++ [binding])
+            | isRight initial' = Right $ getRight initial'
+            | not (conform p c initial_type declared_type) = Right $ Err line $ printf "initializer type %s does not conform to type %s" (output_type' c initial_type) (output_type' c declared_type)
+            | otherwise = Left (Map.insert var_name declared_type o, bindings ++ [LetBinding f1 f2 (Just initial_node)])
+            where type_is_defined = (declared_type == "SELF_TYPE" || Map.member declared_type m)
+                  initial' = type_check o m c p $ Maybe.fromJust initial
+                  Left (initial_node, initial_type) = initial'
+    in if isRight bindings'
+          then Right $ getRight bindings'
+          else if isRight body'
+             then Right $ getRight body'
+             else Left (Let line bindings_node body_node body_type, body_type)
+
+type_check o m c p (Case line expr elements _)
+    | isRight expr' = expr'
     
+    where expr' = type_check o m c p expr'
+          elements' = map process_element 
 
 annotate_ast :: Map String [Attr] -> Map String [Imp] -> Map String String -> [Node] -> Either [Node] Err
 annotate_ast class_map m p ast = foldl annotate_class (Left []) ast
@@ -728,7 +754,7 @@ output_node (Identifier line x anno) = show line : anno : "identifier" : output_
 output_node (Let line bindings body anno) = show line : anno : "let" : output_node_list bindings ++ output_node body
 output_node (Case line e case_elements anno) = show line : anno : "case" : output_node e ++ output_node_list case_elements
 output_node (LetBinding var type_id Nothing) = "let_binding_no_init" : output_nodes [var, type_id]
-output_node (LetBinding var type_id (Just initial)) = "let_binding_no_init" : output_nodes [var, type_id, initial]
+output_node (LetBinding var type_id (Just initial)) = "let_binding_init" : output_nodes [var, type_id, initial]
 output_node (CaseElement var type_id expr) = output_nodes [var, type_id, expr]
 
 output_class_map :: Map String [Attr] -> [String]

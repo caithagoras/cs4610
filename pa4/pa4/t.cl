@@ -5,18 +5,14 @@ class Main inherits IO {
 };
 
 class AAAAA {
-    a:AAAAA;
-    m:Main;
+    x:String;
     g(x:Int, y:AAAAA):SELF_TYPE {
         self
     };
     
     f():Int{
-        a
-        .
-        g
-        (
-        )
+        let x:Int <-3, y: Int<-3+x
+        in x+y
     };
 };
 
