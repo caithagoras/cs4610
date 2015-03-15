@@ -664,7 +664,8 @@ type_check o m c p (Let line bindings body _) =
         
         process_let_binding :: Either (Map String String, [Node]) Err -> Node -> Either (Map String String, [Node]) Err
         process_let_binding acc@(Right _) _ = acc
-        process_let_binding (Left (o, bindings)) binding@(LetBinding f1@(Id var_name _) f2@(Id declared_type type_line) initial)
+        process_let_binding (Left (o, bindings)) binding@(LetBinding f1@(Id var_name var_line) f2@(Id declared_type type_line) initial)
+            | var_name == "self" = Right $ Err var_line $ printf "binding self in a let is not allowed"
             | not type_is_defined = Right $ Err type_line $ printf "unknown type %s" declared_type
             | Maybe.isNothing initial = Left (Map.insert var_name declared_type o, bindings ++ [binding])
             | isRight initial' = Right $ getRight initial'
