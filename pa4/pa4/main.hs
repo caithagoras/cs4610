@@ -457,7 +457,8 @@ type_check o m c p (Id name line)
     | Map.member name o = Left (Id name line, Maybe.fromJust (Map.lookup name o))
     | otherwise = Right $ Err line $ printf "unbound identifier %s" name
 
-type_check o m c p (Assign line lhs rhs _)
+type_check o m c p (Assign line lhs@(Id lhs_name _) rhs _)
+    | lhs_name == "self" = Right $ Err line "cannot assign to self"
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
     | not (conform p c lhs_type rhs_type) = Right $ Err line $ printf "%s does not conform to %s in assignment" (output_type' c rhs_type) (output_type' c lhs_type)
@@ -642,7 +643,7 @@ type_check o m c p (Not line x _)
 type_check o m c p (Negate line x _)
     | isRight x' = x'
     | x_type == "Int" = Left (Negate line x_node "Int", "Int")
-    | otherwise = Right $ Err line $ printf "not applied to type %s instead of Int" (output_type' c x_type)
+    | otherwise = Right $ Err line $ printf "negate applied to type %s instead of Int" (output_type' c x_type)
     where x' = type_check o m c p x
           Left (x_node, x_type) = x'
 
