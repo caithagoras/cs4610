@@ -70,6 +70,43 @@ Class Main inherits IO {
             esac;
         }
     };
+    
+    mx1(): Int {                                        -- tests for built-in functions
+        s.length()
+    };
+    
+    mx2(): String {
+        s.concat(t)
+    };
+    
+    mx3(): Object {
+        t <- s.substr(0, 0)
+    };
+    
+    mx4(): Object {
+        s@Object.abort()
+    };
+    
+    mx5(): String {
+        t <- s.type_name()
+    };
+    
+    mx6(): String {
+        {
+            f <- g.copy();
+            z <- y.copy();
+            t <- s.copy();
+        }
+    };
+    
+    mx(): Main {
+        {
+            a <- self.in_int();
+            s <- (new SELF_TYPE).in_string();
+            out_int(a);
+            out_string(s);
+        }
+    };
 };
 
 class Z {

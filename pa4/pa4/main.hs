@@ -461,7 +461,7 @@ type_check o m c p (Assign line lhs@(Id lhs_name _) rhs _)
     | lhs_name == "self" = Right $ Err line "cannot assign to self"
     | isRight lhs' = lhs'
     | isRight rhs' = rhs'
-    | not (conform p c lhs_type rhs_type) = Right $ Err line $ printf "%s does not conform to %s in assignment" (output_type' c rhs_type) (output_type' c lhs_type)
+    | not (conform p c rhs_type lhs_type) = Right $ Err line $ printf "%s does not conform to %s in assignment" (output_type' c rhs_type) (output_type' c lhs_type)
     | otherwise = Left (Assign line lhs_node rhs_node rhs_type, rhs_type)
     where lhs' = type_check o m c p lhs
           rhs' = type_check o m c p rhs
