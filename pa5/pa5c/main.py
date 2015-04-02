@@ -8,13 +8,18 @@ class Store:
         self.store = {}
 
     def new(self):
-        s = copy.deepcopy(self)
-        s.next_loc += 1
-        return s.next_loc - 1, s
+        self.next_loc += 1
+        return self.next_loc - 1
 
     def put(self, val, loc):
         s = copy.deepcopy(self)
         s.store[loc] = val
+        return s
+
+    def put_all(self, d):
+        s = copy.deepcopy(self)
+        for key, value in d.iteritems():
+            s.store[key] = value
         return s
 
     def get(self, loc):
@@ -27,15 +32,22 @@ class Environment:
         self.environment = {}
 
     def associate(self, var, loc):
-        self.environment[var] = loc
+        e = copy.deepcopy(self)
+        e.environment[var] = loc
+        return e
+
+    def associate_all(self, d):
+        e = copy.deepcopy(self)
+        for key, value in d.iteritems():
+            e[key] = value
+        return e
 
     def get(self, var):
         return self.environment[var]
 
 
 def match(actual, expected):
-    if actual != expected:
-        sys.exit('Mismatch')
+    assert actual == expected
 
 
 def next_int(infile):
@@ -67,7 +79,7 @@ def build_class_map(infile):
                 initializer = build_expr(infile)
                 attributes.append([attribute_name, type_name, initializer])
             else:
-                sys.exit('Mismatch')
+                assert False
 
         class_map[class_name] = attributes
 
@@ -213,7 +225,7 @@ def build_expr(infile):
         elements = build_list(build_case_element, infile)
         return [line_num, type_name, 'case', elements]
 
-    sys.exit('Mismatch')
+    assert False
 
 
 def build_let_binding(infile):
@@ -228,7 +240,7 @@ def build_let_binding(infile):
         initializer = build_expr(infile)
         return [var, type_name, initializer]
 
-    sys.exit('Mismatch')
+    assert False
 
 
 def build_case_element(infile):
@@ -238,11 +250,62 @@ def build_case_element(infile):
     return [var, type_name, body]
 
 
-def run(so, s, e, expr):
-    if expr[2] == 'new':
-        t = expr[3]
-        t0 = so[0] if t == 'SELF_TYPE' else t
+def default(type_name):
+    if type_name == 'Int':
+        return ['Int', 0]
+    elif type_name == 'Bool':
+        return ['Bool', False]
+    elif type_name == 'String':
+        return ['String', 0, '']
+    else:
+        return ['void']
 
+
+def run(class_map, imp_map, so, s, e, expr):
+    if expr[2] == 'assign':
+        v1, s2 = run(class_map, imp_map, so, s, e, expr[4])
+        l1 = e.get(expr[3][1])
+        s3 = s2.put(v1, l1)
+        return v1, s3
+
+    if expr[2] == 'dynamic_dispatch':
+        
+
+    if expr[2] == 'block':
+        s1 = copy.deepcopy(s)
+        assert len(expr[3]) > 0
+
+        v = None
+        for stmt in expr[3]:
+            v, s1 = run(class_map, imp_map, so, s1, e, stmt)
+        return v, s1
+
+    if expr[2] == 'new':
+        t = expr[3][1]
+        t0 = so[0] if t == 'SELF_TYPE' else t
+        attributes = class_map[t0]
+
+        s1 = copy.deepcopy(s)
+        l = [s1.new() for i in attributes]
+        v1 = [t0, dict(zip([attribute[0] for attribute in attributes], l))]
+        s2 = s1.put_all(dict(zip(l, [default(attribute[1]) for attribute in attributes])))
+
+        block_stmts = []
+        for attribute in attributes:
+            if attribute[2] is not None:
+                block_stmts.append([None, None, 'assign', [None, attribute[0]], attribute[2]])
+
+        if len(block_stmts) > 0:
+            block_expr = [None, None, 'block', block_stmts]
+            _, s3 = run(class_map, imp_map, v1, s2, v1[1], block_expr)
+        else:
+            s3 = s2
+        return v1, s3
+
+    if expr[2] == 'integer':
+        return ['Int', expr[3]], s
+
+    assert False
 
 
 def __main__():
@@ -256,9 +319,8 @@ def __main__():
     init_method = [None, 'main']
     init_expr = [None, None, 'dynamic_dispatch', init_receiver, init_method, []]
 
-    run(None, Store(), Environment(), init_expr)
-
-    print(imp_map)
+    v, s = run(class_map, imp_map, None, Store(), Environment(), init_receiver)
+    print(v, s.store)
 
 if __name__ == '__main__':
     __main__()
