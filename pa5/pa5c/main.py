@@ -11,7 +11,7 @@ class Store:
         self.next_loc += 1
         return self.next_loc - 1
 
-    def put(self, val, loc):
+    def put(self, loc, val):
         s = copy.deepcopy(self)
         s.store[loc] = val
         return s
@@ -39,7 +39,7 @@ class Environment:
     def associate_all(self, d):
         e = copy.deepcopy(self)
         for key, value in d.iteritems():
-            e[key] = value
+            e.environment[key] = value
         return e
 
     def get(self, var):
@@ -84,6 +84,7 @@ def build_class_map(infile):
         class_map[class_name] = attributes
 
     return class_map
+
 
 def build_imp_map(infile):
     match(next_line(infile), 'implementation_map')
@@ -261,15 +262,56 @@ def default(type_name):
         return ['void']
 
 
+def run_internal(so, s, e, method_call):
+    if method_call == 'Object.abort':
+        sys.exit('abort')
+
+    if method_call == 'Object.type_name':
+        return ['String', so[0]]
+
+    if method_call == 'IO.out_string':
+        l = e.get('x')
+        val = s.get(l)[1]
+        sys.stdout.write(val)
+        return so
+
+    if method_call == 'IO.out_int':
+        l = e.get('x')
+        val = s.get(l)[1]
+        sys.stdout.write(val)
+
+    if method_call == 'IO.in_string':
+        pass
+
+
 def run(class_map, imp_map, so, s, e, expr):
+    if expr[2] == 'internal':
+        run_internal(so, s, e, expr[3])
+
     if expr[2] == 'assign':
         v1, s2 = run(class_map, imp_map, so, s, e, expr[4])
         l1 = e.get(expr[3][1])
-        s3 = s2.put(v1, l1)
+        s3 = s2.put(l1, v1)
         return v1, s3
 
     if expr[2] == 'dynamic_dispatch':
-        
+        s1 = copy.deepcopy(s)
+        v = []
+        for actual in expr[5]:
+            vx, s1 = run(class_map, imp_map, so, s1, e, actual)
+            v.append(vx)
+        v0, s2 = run(class_map, imp_map, so, s1, e, expr[3])
+        if v0[0] == 'void':
+            sys.exit('ERROR: %d: Exception: dispatch on void' % expr[0])
+        class_name = v0[0]
+        method_name = expr[4][1]
+        imp = imp_map[class_name][method_name]
+        formals, body = imp[0], imp[2]
+        lx = [s2.new() for i in formals]
+        s3 = s2.put_all(dict(zip(lx, v)))
+        e1 = e.associate_all(v0[1]).associate_all(dict(zip(formals, lx)))
+        v1, s4 = run(class_map, imp_map, v0, s3, e1, body)
+        return v1, s4
 
     if expr[2] == 'block':
         s1 = copy.deepcopy(s)
@@ -305,6 +347,12 @@ def run(class_map, imp_map, so, s, e, expr):
     if expr[2] == 'integer':
         return ['Int', expr[3]], s
 
+    if expr[2] == 'string':
+        return ['String', expr[3]], s
+
+    if expr[2] == 'identifier':
+        
+
     assert False
 
 
@@ -319,7 +367,7 @@ def __main__():
     init_method = [None, 'main']
     init_expr = [None, None, 'dynamic_dispatch', init_receiver, init_method, []]
 
-    v, s = run(class_map, imp_map, None, Store(), Environment(), init_receiver)
+    v, s = run(class_map, imp_map, None, Store(), Environment(), init_expr)
     print(v, s.store)
 
 if __name__ == '__main__':
