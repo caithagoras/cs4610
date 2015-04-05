@@ -1,0 +1,2 @@
+1. Negation of -2147483648
+2. "for other comparison returns false", but a <= a

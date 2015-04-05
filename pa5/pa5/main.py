@@ -1,5 +1,9 @@
+import os
 import sys
 import copy
+
+sys.setrecursionlimit(5000)
+class_map, imp_map, parent_map = None, None, None
 
 
 class Store:
@@ -183,7 +187,7 @@ def build_expr(infile):
     if expr_type == 'while':
         predicate = build_expr(infile)
         body = build_expr(infile)
-        return [line_num, type_name, 'if', predicate, predicate, body]
+        return [line_num, type_name, 'while', predicate, body]
 
     if expr_type == 'block':
         body = build_list(build_expr, infile)
@@ -194,9 +198,9 @@ def build_expr(infile):
         return [line_num, type_name, 'new', identifier]
 
     if expr_type in ['plus', 'minus', 'times', 'divide', 'lt', 'le', 'eq']:
-        lhs = build_expr(infile)
-        rhs = build_expr(infile)
-        return [line_num, type_name, expr_type, lhs, rhs]
+        x = build_expr(infile)
+        y = build_expr(infile)
+        return [line_num, type_name, expr_type, x, y]
 
     if expr_type in ['isvoid', 'not', 'negate']:
         x = build_expr(infile)
@@ -254,64 +258,175 @@ def build_case_element(infile):
 def default(type_name):
     if type_name == 'Int':
         return ['Int', 0]
-    elif type_name == 'Bool':
+    if type_name == 'Bool':
         return ['Bool', False]
-    elif type_name == 'String':
+    if type_name == 'String':
         return ['String', 0, '']
-    else:
-        return ['void']
+    return ['void']
 
 
+# TODO: Object.copy
+# TODO: rename variables
 def run_internal(so, s, e, method_call):
     if method_call == 'Object.abort':
         sys.exit('abort')
 
     if method_call == 'Object.type_name':
-        return ['String', so[0]]
+        return ['String', len(so[0]), so[0]], s
 
     if method_call == 'IO.out_string':
         l = e.get('x')
-        val = s.get(l)[1]
+        val = s.get(l)[2].replace('\\n', '\n').replace('\\t', '\t')
         sys.stdout.write(val)
-        return so
+        return so, s
 
     if method_call == 'IO.out_int':
         l = e.get('x')
         val = s.get(l)[1]
-        sys.stdout.write(val)
+        sys.stdout.write(str(val))
+        return so, s
 
     if method_call == 'IO.in_string':
-        pass
+        line = sys.stdin.readline().strip('\n')
+        if '\0' in line:
+            return ['String', 0, ''], s
+        else:
+            return ['String', len(line), line], s
+
+    if method_call == 'IO.in_int':
+        line = sys.stdin.readline().strip(' \n')
+        val = check_int(line)
+        if val is not None:
+            return ['Int', val], s
+        else:
+            return ['Int', 0], s
+
+    if method_call == 'String.length':
+        return ['Int', so[1]], s
+
+    if method_call == 'String.concat':
+        par_s = s.get(e.get('s'))
+        return ['String', so[1] + par_s[1], so[2] + par_s[2]], s
+
+    if method_call == 'String.substr':
+        par_i = s.get(e.get('i'))[1]
+        par_l = s.get(e.get('l'))[1]
+        if par_i + par_l > so[1]:
+            sys.exit('ERROR: 0: Exception: String.substr out of range')
+        return ['String', par_l, so[2][par_i:par_i+par_l]], s
 
 
-def run(class_map, imp_map, so, s, e, expr):
+def check_int(s):
+    if len(s) == 0:
+        return None
+
+    i = 0
+    if s[0] in ['+', '-']:
+        i += 1
+
+    numbers = [str(k) for k in range(10)]
+    while i < len(s) and s[i] in numbers:
+        i += 1
+
+    try:
+        val = int(s[0:i])
+        if -2147483648 <= val <= 2147483647:
+            return val
+        else:
+            return None
+    except ValueError:
+        return None
+
+
+def is_primitive(v):
+    if v[0] in ['Int', 'Bool', 'String']:
+        return True
+    return False
+
+
+def convert_to_signed_32(t):
+    x = t & 0xffffffff
+    if x > 0x7fffffff:
+        return x - 0x100000000
+    else:
+        return x
+
+def compare(x, y, op):
+    if op == 'lt':
+        return x < y
+
+    if op == 'le':
+        return x <= y
+
+    if op == 'eq':
+        return x == y
+
+    assert False
+
+
+def run(so, s, e, expr):
     if expr[2] == 'internal':
-        run_internal(so, s, e, expr[3])
+        v, s1 = run_internal(so, s, e, expr[3])
+        return v, s1
 
     if expr[2] == 'assign':
-        v1, s2 = run(class_map, imp_map, so, s, e, expr[4])
+        v1, s2 = run(so, s, e, expr[4])
         l1 = e.get(expr[3][1])
         s3 = s2.put(l1, v1)
         return v1, s3
 
-    if expr[2] == 'dynamic_dispatch':
+    if expr[2] in ['dynamic_dispatch', 'self_dispatch']:
+        if expr[2] == 'dynamic_dispatch':
+            method_name = expr[4][1]
+            actuals = expr[5]
+        else:
+            method_name = expr[3][1]
+            actuals = expr[4]
+
         s1 = copy.deepcopy(s)
         v = []
-        for actual in expr[5]:
-            vx, s1 = run(class_map, imp_map, so, s1, e, actual)
+        for actual in actuals:
+            vx, s1 = run(so, s1, e, actual)
             v.append(vx)
-        v0, s2 = run(class_map, imp_map, so, s1, e, expr[3])
+
+        if expr[2] == 'dynamic_dispatch':
+            v0, s2 = run(so, s1, e, expr[3])
+        else:
+            v0, s2 = so, s1
+
         if v0[0] == 'void':
             sys.exit('ERROR: %d: Exception: dispatch on void' % expr[0])
+
         class_name = v0[0]
-        method_name = expr[4][1]
         imp = imp_map[class_name][method_name]
         formals, body = imp[0], imp[2]
         lx = [s2.new() for i in formals]
         s3 = s2.put_all(dict(zip(lx, v)))
-        e1 = e.associate_all(v0[1]).associate_all(dict(zip(formals, lx)))
-        v1, s4 = run(class_map, imp_map, v0, s3, e1, body)
+
+        if is_primitive(v0):
+            e1 = e
+        else:
+            e1 = e.associate_all(v0[1])
+        e2 = e1.associate_all(dict(zip(formals, lx)))
+        v1, s4 = run(v0, s3, e2, body)
         return v1, s4
+
+    if expr[2] == 'if':
+        v0, s2 = run(so, s, e, expr[3])
+        if v0[1]:
+            v2, s3 = run(so, s2, e, expr[4])
+            return v2, s3
+        else:
+            v3, s3 = run(so, s2, e, expr[5])
+            return v3, s3
+
+    if expr[2] == 'while':
+        s1 = copy.deepcopy(s)
+        while True:
+            v0, s1 = run(so, s1, e, expr[3])
+            if not v0[1]:
+                return ['void'], s1
+            _, s1 = run(so, s1, e, expr[4])
 
     if expr[2] == 'block':
         s1 = copy.deepcopy(s)
@@ -319,12 +434,15 @@ def run(class_map, imp_map, so, s, e, expr):
 
         v = None
         for stmt in expr[3]:
-            v, s1 = run(class_map, imp_map, so, s1, e, stmt)
+            v, s1 = run(so, s1, e, stmt)
         return v, s1
 
     if expr[2] == 'new':
         t = expr[3][1]
-        t0 = so[0] if t == 'SELF_TYPE' else t
+        if t == 'SELF_TYPE':
+            t0 = so[0]
+        else:
+            t0 = t
         attributes = class_map[t0]
 
         s1 = copy.deepcopy(s)
@@ -339,26 +457,105 @@ def run(class_map, imp_map, so, s, e, expr):
 
         if len(block_stmts) > 0:
             block_expr = [None, None, 'block', block_stmts]
-            _, s3 = run(class_map, imp_map, v1, s2, v1[1], block_expr)
+            _, s3 = run(v1, s2, v1[1], block_expr)
         else:
             s3 = s2
         return v1, s3
+
+    if expr[2] == 'isvoid':
+        x, s2 = run(so, s, e, expr[3])
+
+        if x[0] == 'void':
+            return ['Bool', True], s2
+
+        return ['Bool', False], s2
+
+    if expr[2] in ['plus', 'minus', 'times', 'divide']:
+        x, s2 = run(so, s, e, expr[3])
+        y, s3 = run(so, s2, e, expr[4])
+
+        if expr[2] == 'plus':
+            return ['Int', convert_to_signed_32(x[1] + y[1])], s3
+
+        if expr[2] == 'minus':
+            return ['Int', convert_to_signed_32(x[1] - y[1])], s3
+
+        if expr[2] == 'times':
+            return ['Int', convert_to_signed_32(x[1] * y[1])], s3
+
+        if expr[2] == 'divide':
+            if y[1] == 0:
+                sys.exit('ERROR: %d: Exception: division by zero' % expr[0])
+            q = abs(x[1]) // abs(y[1])
+            if x[1] * y[1] > 0:
+                result = q
+            else:
+                result = -q
+            return ['Int', convert_to_signed_32(result)], s3
+
+    if expr[2] == 'negate':
+        x, s2 = run(so, s, e, expr[3])
+        if x[1] == -0x80000000:
+            return ['Int', x[1]], s2
+        else:
+            return ['Int', -x[1]], s2
+
+    if expr[2] in ['lt', 'le', 'eq']:
+        x, s2 = run(so, s, e, expr[3])
+        y, s3 = run(so, s2, e, expr[4])
+
+        if x[0] == 'void' or x[1] == 'void':
+            return ['Bool', False], s3
+
+        if x[0] == 'Int' and y[0] == 'Int':
+            return ['Bool', compare(x[1], y[1], expr[2])], s3
+
+        if x[0] == 'Bool' and y[0] == 'Bool':
+            return ['Bool', compare(x[1], y[1], expr[2])], s3
+
+        if x[0] == 'String' and y[0] == 'String':
+            return ['Bool', compare(x[2], y[2], expr[2])], s3
+
+        assert not is_primitive(x) and not is_primitive(y)
+
+        if expr[2] in ['eq', 'le']:
+            return ['Bool', x[1] == y[1]], s3
+        else:
+            return ['Bool', False], s3
+
+    if expr[2] == 'not':
+        x, s2 = run(so, s, e, expr[3])
+        return ['Bool', not x[1]], s
 
     if expr[2] == 'integer':
         return ['Int', expr[3]], s
 
     if expr[2] == 'string':
-        return ['String', expr[3]], s
+        return ['String', len(expr[3]), expr[3]], s
+
+    if expr[2] == 'true':
+        return ['Bool', True], s
+
+    if expr[2] == 'false':
+        return ['Bool', False], s
 
     if expr[2] == 'identifier':
-        
+        identifier = expr[3][1]
+        if identifier == 'self':
+            return so, s
 
+        return s.get(e.get(identifier)), s
+
+    #print(expr[3])
     assert False
 
 
 def __main__():
     input_filename = sys.argv[1]
     infile = open(input_filename, 'r')
+    global class_map
+    global imp_map
+    global parent_map
     class_map = build_class_map(infile)
     imp_map = build_imp_map(infile)
     parent_map = build_parent_map(infile)
@@ -367,8 +564,8 @@ def __main__():
     init_method = [None, 'main']
     init_expr = [None, None, 'dynamic_dispatch', init_receiver, init_method, []]
 
-    v, s = run(class_map, imp_map, None, Store(), Environment(), init_expr)
-    print(v, s.store)
+    v, s = run(None, Store(), Environment(), init_expr)
+    #print(v, s)
 
 if __name__ == '__main__':
     __main__()
