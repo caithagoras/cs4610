@@ -1,8 +1,7 @@
-import os
 import sys
 import copy
 
-sys.setrecursionlimit(5000)
+sys.setrecursionlimit(10000)
 class_map, imp_map, parent_map = None, None, None
 
 
@@ -274,6 +273,20 @@ def run_internal(so, s, e, method_call):
 
     if method_call == 'Object.type_name':
         return ['String', len(so[0]), so[0]], s
+
+    if method_call == 'Object.copy':
+        if so[0] in ['Int', 'Bool', 'String']:
+            return so, s
+
+        s1 = copy.deepcopy(s)
+        e1 = Environment()
+        for identifier, old_loc in so[1].iteritems():
+            val = s1.get(old_loc)
+            new_loc = s1.new()
+            s1 = s1.put(new_loc, val)
+            e1.associate(identifier, new_loc)
+
+        return [so[0], e1], s1
 
     if method_call == 'IO.out_string':
         loc_x = e.get('x')

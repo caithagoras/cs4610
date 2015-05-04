@@ -1,6 +1,6 @@
 #!/bin/bash
 
-tests=(rosetta)
+tests=(t)
 input="t.in"
 dir="."
 
