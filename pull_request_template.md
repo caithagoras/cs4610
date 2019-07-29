@@ -1,12 +1,12 @@
-Please add release notes to your PR by filling the section below
+Please fill in the release notes. See [README](caithagoras/cs4610/blob/master/README.md#release-notes) for details.
 
-== RELEASE NOTES ==
+    == RELEASE NOTES ==
+    
+    General Changes
+    ---------------
+    * ...
+    * ...
 
-General Chanegs
----------------
-* ...
-* ...
+If release note is required, use:
 
-Or if there is no notes required
-
-== NO RELEASE NOTES ==
+    == NO RELEASE NOTE ==
