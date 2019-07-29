@@ -1,12 +1,12 @@
-Please add release notes to your PR by filling the section below
+Please fill in the release notes at the bottom of the PR description:
 
 == RELEASE NOTES ==
 
-General Chanegs
+General Changes
 ---------------
 * ...
 * ...
 
-Or if there is no notes required
+If release note is unnecessary, add:
 
-== NO RELEASE NOTES ==
+== NO RELEASE NOTE ==
