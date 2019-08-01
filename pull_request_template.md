@@ -3,7 +3,7 @@ Please fill in the release notes. See [README](caithagoras/cs4610/blob/master/RE
 ```
 == RELEASE NOTES ==
 
-# General Changes
+General Changes
 * ...
 * ...
 ```
